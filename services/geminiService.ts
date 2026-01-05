@@ -1,205 +1,263 @@
 import Groq from "groq-sdk";
-import { RecognitionMode } from '../types';
+import { RecognitionMode } from "../types";
 
-// Initialize Groq Client
-// Note: Ensure VITE_GROQ_API_KEY is set in your Vercel Environment Variables
-const groq = new Groq({ 
-  apiKey: (import.meta as any).env.VITE_GROQ_API_KEY || '', 
-  dangerouslyAllowBrowser: true 
+/* ============================================================================
+   GROQ CLIENT
+============================================================================ */
+const groq = new Groq({
+  apiKey: (import.meta as any).env.VITE_GROQ_API_KEY || "",
+  dangerouslyAllowBrowser: true,
 });
 
+/* ============================================================================
+   SYSTEM INSTRUCTION
+============================================================================ */
 const SYSTEM_INSTRUCTION_BASE = `
-You are an expert AI accessibility assistant and translator.
-Your goal is to facilitate communication for users with disabilities across ALL languages.
+You are an AI accessibility assistant.
 
-CORE PROTOCOLS:
-1. GLOBAL LANGUAGE INPUT: The user may input text, speech, or gestures in ANY language.
-2. AUTO-TRANSLATION: You MUST automatically detect the source language based on the user's input and their selected preference.
-   - If the input is NOT English, translate it into clear, grammatical English first.
-   - If the input IS English, keep it as is.
-3. ASL CONVERSION: Convert the final English text into American Sign Language (ASL) Gloss.
-   - Use uppercase for gloss (e.g., "HELLO FRIEND").
-   - Remove articles (a, an, the) and "to be" verbs (is, are, am).
-   - Use Subject-Object-Verb (SOV) or Topic-Comment structure.
-   - For proper nouns, fingerprinting is implied, but output the word in gloss (e.g., "NAME-BOB").
+Rules:
+- Detect input language automatically.
+- Translate to clear English if required.
+- Convert English to ASL Gloss.
+- Gloss must be UPPERCASE.
+- Remove articles and "to be" verbs.
+- Return ONLY what is asked. No explanations.
+- Do NOT provide synonyms. Use the exact single Gloss word.
 `;
 
-/**
- * Analyzes a video frame (image) for gesture recognition.
- */
+/* ============================================================================
+   SAFE JSON PARSER (NO CRASH GUARANTEE)
+============================================================================ */
+function safeParseJSON(content?: string): any {
+  if (!content) return {};
+  try {
+    const cleaned = content.replace(/```json|```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("JSON parse failed. Raw:", content);
+    return {};
+  }
+}
+
+/* ============================================================================
+   GESTURE (IMAGE → ENGLISH)
+============================================================================ */
 export const analyzeGesture = async (
   base64Image: string,
-  mode: RecognitionMode,
+  mode: RecognitionMode = RecognitionMode.SENTENCE,
   language: string = "Auto"
 ): Promise<string> => {
   try {
-    const isWordMode = mode === RecognitionMode.WORD;
+    const isWordMode =
+      mode === RecognitionMode.WORD || (mode as any) === "WORD";
 
     const prompt = isWordMode
       ? `
-        Analyze this image for a hand sign or gesture.
-        Context: The user has held this pose, intending to communicate a word.
-        User's Language: "${language}".
-
-        Instructions:
-        1. Identify the specific hand sign (ASL, ISL, or general gesture).
-        2. If it is a clear sign, translate it to a single English word.
-        3. If the image is blurry, ambiguous, or just a person standing still without a clear sign, return "No gesture detected."
-        4. Do not describe the person, only output the MEANING of the sign.
-        `
+Identify the hand sign.
+Return ONLY one English word.
+If unclear, return "No gesture detected".
+`
       : `
-        Analyze this image for body language or sign language sentences.
-        Context: The user is performing a gesture sentence.
-        User's Language: "${language}".
-
-        Instructions:
-        1. Translate the signs/gestures into a natural English sentence.
-        2. If the user is just standing/sitting with no clear communicative gesture, return "No gesture detected."
-        3. Be robust to lighting and background clutter. Focus on the hands and body pose.
-        `;
+Identify the sign language sentence.
+Return a clear English sentence.
+If unclear, return "No gesture detected".
+`;
 
     const response = await groq.chat.completions.create({
-      model: 'llama-3.2-11b-vision-preview',
-      messages: [
-        {
-          role: 'system',
-          content: SYSTEM_INSTRUCTION_BASE
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-          ] as any
-        }
-      ],
+      model: "llama-3.2-11b-vision-preview",
       temperature: 0.2,
       max_tokens: isWordMode ? 15 : 60,
+      messages: [
+        { role: "system", content: SYSTEM_INSTRUCTION_BASE },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${base64Image}`,
+              },
+            },
+          ] as any,
+        },
+      ],
     });
 
-    return response.choices[0]?.message?.content || "No gesture detected.";
-  } catch (error) {
-    console.error("Gesture analysis failed:", error);
-    throw error;
+    return response.choices[0]?.message?.content || "No gesture detected";
+  } catch (err) {
+    console.error("Gesture failed:", err);
+    return "No gesture detected";
   }
 };
 
-/**
- * Converts text or image text to ASL-friendly English (Gloss format estimation)
- */
+/* ============================================================================
+   TEXT / IMAGE → ASL GLOSS
+============================================================================ */
 export const processTextForAvatar = async (
   inputText: string,
   base64Image: string | null,
-  mode: RecognitionMode,
+  mode: RecognitionMode = RecognitionMode.SENTENCE,
   language: string = "Auto"
-): Promise<{ original: string, gloss: string }> => {
+): Promise<{ original: string; gloss: string }> => {
   try {
-    let messages: any[] = [
-      { role: 'system', content: SYSTEM_INSTRUCTION_BASE }
-    ];
+    const isWordMode =
+      mode === RecognitionMode.WORD || (mode as any) === "WORD";
 
-    const taskDescription = `
-      Task:
-      1. Detect the source language of the input text (hint: user selected ${language}).
-      2. Translate the input into natural, clear English.
-      3. Convert that English into ASL Gloss keywords for an avatar.
+    const task = `
+Task:
+1. Identify the input language (User hint: ${language}).
+2. Translate the input to clear English ${isWordMode ? "(Single Word)" : "(Sentence)"}.
+3. Convert the English translation to ASL Gloss (UPPERCASE).
+   - STRICT: Do not output synonyms. Input "Please" -> Gloss "PLEASE".
 
-      Output JSON format: { "english": "Translated English Text", "gloss": "ASL GLOSS TEXT" }
-    `;
+Output JSON Schema:
+{
+  "english": "string",
+  "gloss": "string"
+}
+
+Ensure the keys are exactly "english" and "gloss".
+`;
+
+    const messages: any[] = [{ role: "system", content: SYSTEM_INSTRUCTION_BASE }];
 
     if (base64Image) {
       messages.push({
-        role: 'user',
+        role: "user",
         content: [
-          { type: 'text', text: `Extract text from this image. The expected language is "${language}". ${taskDescription}` },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-        ]
+          { type: "text", text: task },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:image/jpeg;base64,${base64Image}`,
+            },
+          },
+        ],
       });
     } else {
       messages.push({
-        role: 'user',
-        content: `Process this input text: "${inputText}". User specified language: "${language}". ${taskDescription}`
+        role: "user",
+        content: `Input: "${inputText}". ${task}`,
       });
     }
 
     const response = await groq.chat.completions.create({
-      model: base64Image ? 'llama-3.2-11b-vision-preview' : 'llama3-8b-8192',
-      messages: messages,
-      response_format: { type: "json_object" }
+      model: base64Image
+        ? "llama-3.2-11b-vision-preview"
+        : "llama-3.1-8b-instant", // ✅ ACTIVE MODEL
+      messages,
+      response_format: { type: "json_object" },
     });
 
-    const content = response.choices[0]?.message?.content;
-    const result = content ? JSON.parse(content) : {};
-    
-    return {
-      original: result.english || "Processing error",
-      gloss: result.gloss || ""
-    };
+    const result = safeParseJSON(response.choices[0]?.message?.content);
 
-  } catch (error) {
-    console.error("Text processing failed:", error);
-    throw error;
+    return {
+      original: result.english || inputText || "",
+      gloss: result.gloss || "",
+    };
+  } catch (err) {
+    console.error("Text processing failed:", err);
+    return { original: "", gloss: "" };
   }
 };
 
-/**
- * Processes audio input for speech recognition.
- */
+// Language Code Mapping for Whisper (Name -> ISO-639-1)
+const WHISPER_LANG_CODES: Record<string, string> = {
+  "English": "en",
+  "Hindi": "hi",
+  "Bengali": "bn",
+  "Tamil": "ta",
+  "Telugu": "te",
+  "Marathi": "mr",
+  "Gujarati": "gu",
+  "Kannada": "kn",
+  "Malayalam": "ml",
+  "Punjabi": "pa",
+  "Urdu": "ur",
+  "Spanish": "es",
+  "French": "fr",
+  "Mandarin": "zh",
+  "Arabic": "ar",
+  "German": "de",
+  "Japanese": "ja"
+};
+
+/* ============================================================================
+   SPEECH → ASL GLOSS
+============================================================================ */
 export const processSpeech = async (
   audioBase64: string,
   mimeType: string,
   language: string = "Auto"
-): Promise<{ text: string, gloss: string }> => {
+): Promise<{ text: string; gloss: string }> => {
   try {
-    // 1. Convert Base64 to File for Whisper
-    const byteCharacters = atob(audioBase64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    // 1. Clean Base64 (Remove data URL prefix if present)
+    const base64Data = audioBase64.includes("base64,") 
+      ? audioBase64.split("base64,")[1] 
+      : audioBase64;
+
+    // Base64 → File
+    const chars = atob(base64Data.trim());
+    const bytes = new Uint8Array(chars.length);
+    for (let i = 0; i < chars.length; i++) {
+      bytes[i] = chars.charCodeAt(i);
     }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: mimeType });
-    const file = new File([blob], "audio.wav", { type: mimeType });
 
-    // 2. Transcribe using Groq Whisper
+    const blob = new Blob([bytes], { type: mimeType });
+    
+    // Fix: Ensure correct file extension for Whisper based on MIME type
+    let ext = "wav";
+    if (mimeType.includes("webm")) ext = "webm";
+    else if (mimeType.includes("mp4")) ext = "mp4";
+    else if (mimeType.includes("ogg")) ext = "ogg";
+    const file = new File([blob], `audio.${ext}`, { type: mimeType });
+
+    // 2. Map Language Name to ISO Code for Whisper
+    const isoLang = WHISPER_LANG_CODES[language] || undefined;
+
+    // Whisper STT
     const transcription = await groq.audio.transcriptions.create({
-      file: file,
-      model: "whisper-large-v3-turbo",
-      language: language === 'Auto' ? undefined : undefined,
-      response_format: "json"
+      file,
+      model: "whisper-large-v3", // Use non-turbo for better accuracy
+      response_format: "json",
+      language: isoLang, // Explicit language improves accuracy
+      temperature: 0.0, // Deterministic output
+      prompt: language !== "Auto" ? `The audio is in ${language}.` : "Clear speech."
     });
 
-    const transcribedText = transcription.text;
+    const spokenText = transcription.text || "";
 
-    // 3. Convert to Gloss using Llama
+    // Convert to Gloss
     const response = await groq.chat.completions.create({
-      model: 'llama3-8b-8192',
+      model: "llama-3.1-8b-instant", // ✅ ACTIVE MODEL
       messages: [
-        { role: 'system', content: SYSTEM_INSTRUCTION_BASE },
-        { 
-          role: 'user', 
+        { role: "system", content: SYSTEM_INSTRUCTION_BASE },
+        {
+          role: "user",
           content: `
-            The user said: "${transcribedText}".
-            Task:
-            1. Translate to clear English if needed.
-            2. Convert to ASL Gloss.
-            
-            Output JSON format: { "transcription": "English Translation", "gloss": "ASL GLOSS" }
-          ` 
-        }
+Return JSON ONLY.
+Convert to English if needed.
+Convert to ASL Gloss.
+
+Format:
+{ "transcription": "TEXT", "gloss": "ASL GLOSS" }
+
+Input: "${spokenText}"
+`,
+        },
       ],
-      response_format: { type: "json_object" }
+      response_format: { type: "json_object" },
     });
 
-    const content = response.choices[0]?.message?.content;
-    const result = content ? JSON.parse(content) : {};
+    const result = safeParseJSON(response.choices[0]?.message?.content);
 
     return {
-      text: result.transcription || transcribedText,
-      gloss: result.gloss || ""
+      text: result.transcription || spokenText,
+      gloss: result.gloss || "",
     };
-  } catch (error) {
-    console.error("Speech processing failed:", error);
-    throw error;
+  } catch (err) {
+    console.error("Speech failed:", err);
+    return { text: "", gloss: "" };
   }
 };

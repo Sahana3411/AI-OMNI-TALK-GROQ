@@ -49,9 +49,6 @@ const POSE_LIBRARY: Record<string, any> = {
     RightArm: [-0.55, 0.10, 0.05],
     RightForeArm: [0.0, -0.30, 1.25],
     RightHand: [0.0, 1.10, 0.0],
-    LeftArm: [-1.35, 0.0, 0.0],
-    LeftForeArm: [0,0,0],
-    LeftHand: [0,0,0],
     fingers: FINGER_SHAPES.OPEN,
     wave: true
   },
@@ -69,8 +66,8 @@ const POSE_LIBRARY: Record<string, any> = {
 
   // 3. PLEASE: Rub chest
   "PLEASE": {
-    RightArm: [0.2, 0, 1.1],       // Lower, close to body
-    RightForeArm: [0, 0, 2.0],     // Bend up to chest
+    RightArm: [0.2, 0, -2.1],       // Lower, close to body
+    RightForeArm: [0, 0, -1.5],     // Bend up to chest
     LeftArm: [1.30, 0, 0],         // Keep left arm down
     fingers: FINGER_SHAPES.FLAT,
     animation: "rub_chest"
@@ -94,6 +91,22 @@ const POSE_LIBRARY: Record<string, any> = {
     animation: "shake_hand"
   },
 
+YOU: {
+    // Arm slightly forward
+    RightArm: [0.4, 0.0, 0.9],
+
+    // Elbow bent so hand comes forward
+    RightForeArm: [0.0, -0.2, 1.6],
+
+    // Fingers: only index open
+    fingers: {
+      thumb: 1.0,
+      index: 0.0,     // 👈 pointing
+      middle: 1.5,
+      ring: 1.5,
+      pinky: 1.5,
+    }
+  },
   // 6. IDLE (Arms Down / Natural Stand)
   "IDLE": {
     // ---- RIGHT ARM DOWN ----

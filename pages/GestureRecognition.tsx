@@ -106,7 +106,7 @@ export default function GestureRecognition({ onBack, onSuccess }: GestureRecogni
   const [selectedLanguage, setSelectedLanguage] = useState("Auto");
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  // Modes: 'CLOUD' (Gemini) or 'LOCAL' (MediaPipe)
+  // Modes: 'CLOUD' (Groq) or 'LOCAL' (MediaPipe)
   // Persist preference in localStorage
   const [preferredMode, setPreferredMode] = useState<'CLOUD' | 'LOCAL'>(() => {
     return (localStorage.getItem('gestureMode') as 'CLOUD' | 'LOCAL') || 'LOCAL';
@@ -697,6 +697,7 @@ export default function GestureRecognition({ onBack, onSuccess }: GestureRecogni
       
       if (ctx) {
         // Draw the RAW video frame (unmirrored) so Gemini gets the correct orientation
+        // Draw the RAW video frame (unmirrored) so AI gets the correct orientation
         // User sees mirrored, but AI should see reality (Right hand = Right hand in image)
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
@@ -743,6 +744,8 @@ export default function GestureRecognition({ onBack, onSuccess }: GestureRecogni
   
   const isErrorResult = result && (result.includes("failed") || result.includes("Error") || result.includes("Connection") || result.includes("Server busy") || result.includes("Service unavailable"));
 
+  const displayResult = result.split('|||')[0];
+
   return (
     <div className="flex flex-col w-full min-h-screen md:h-full md:items-center md:justify-center md:py-8">
       {/* Main Glass Container */}
@@ -778,7 +781,7 @@ export default function GestureRecognition({ onBack, onSuccess }: GestureRecogni
               <button
                 onClick={() => isOnline && setPreferredMode('CLOUD')}
                 disabled={!isOnline}
-                title={!isOnline ? "Requires Internet Connection" : "Gemini Cloud AI"}
+                title={!isOnline ? "Requires Internet Connection" : "Groq Cloud AI"}
                 className={`flex items-center px-3 py-1.5 rounded-md text-xs font-bold transition-all focus:outline-none focus:ring-1 focus:ring-blue-500 ${
                   effectiveMode === 'CLOUD' 
                     ? 'bg-blue-600 text-white shadow-sm' 
@@ -1020,7 +1023,7 @@ export default function GestureRecognition({ onBack, onSuccess }: GestureRecogni
                          <div className="absolute inset-0 bg-emerald-500/10 animate-pulse pointer-events-none"></div>
                       )}
                       <p className={`text-xl font-medium text-center leading-snug animate-fade-in relative z-10 ${isErrorResult ? 'text-red-500 dark:text-red-400' : 'text-gray-800 dark:text-gray-100'}`}>
-                        {result}
+                        {displayResult}
                       </p>
                     </>
                   )}
@@ -1048,7 +1051,7 @@ export default function GestureRecognition({ onBack, onSuccess }: GestureRecogni
             {/* Bottom Action */}
             <div className="p-4 border-t border-gray-100 dark:border-gray-700 bg-white/50 dark:bg-gray-900/50 pb-20 md:pb-4 backdrop-blur-md">
                 <button 
-                  onClick={() => 'speechSynthesis' in window && window.speechSynthesis.speak(new SpeechSynthesisUtterance(result))}
+                  onClick={() => 'speechSynthesis' in window && window.speechSynthesis.speak(new SpeechSynthesisUtterance(displayResult))}
                   disabled={!result || result.includes("Waiting") || result.includes("Tracking") || isErrorResult || !!modelError}
                   className="w-full flex items-center justify-center p-3.5 bg-gray-100 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-700 dark:text-gray-200 font-bold shadow-sm active:scale-95 transition-transform hover:bg-gray-200 dark:hover:bg-gray-700 text-sm disabled:opacity-50"
                 >
