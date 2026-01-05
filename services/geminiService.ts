@@ -1,8 +1,12 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import Groq from "groq-sdk";
 import { RecognitionMode } from '../types';
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize Groq Client
+// Note: Ensure VITE_GROQ_API_KEY is set in your Vercel Environment Variables
+const groq = new Groq({ 
+  apiKey: (import.meta as any).env.VITE_GROQ_API_KEY || '', 
+  dangerouslyAllowBrowser: true 
+});
 
 const SYSTEM_INSTRUCTION_BASE = `
 You are an expert AI accessibility assistant and translator.
@@ -24,20 +28,19 @@ CORE PROTOCOLS:
  * Analyzes a video frame (image) for gesture recognition.
  */
 export const analyzeGesture = async (
-  base64Image: string, 
+  base64Image: string,
   mode: RecognitionMode,
   language: string = "Auto"
 ): Promise<string> => {
   try {
     const isWordMode = mode === RecognitionMode.WORD;
-    
-    // Robust prompt for handling stability and potential partial gestures
-    const prompt = isWordMode 
+
+    const prompt = isWordMode
       ? `
         Analyze this image for a hand sign or gesture.
         Context: The user has held this pose, intending to communicate a word.
         User's Language: "${language}".
-        
+
         Instructions:
         1. Identify the specific hand sign (ASL, ISL, or general gesture).
         2. If it is a clear sign, translate it to a single English word.
@@ -48,30 +51,33 @@ export const analyzeGesture = async (
         Analyze this image for body language or sign language sentences.
         Context: The user is performing a gesture sentence.
         User's Language: "${language}".
-        
+
         Instructions:
         1. Translate the signs/gestures into a natural English sentence.
         2. If the user is just standing/sitting with no clear communicative gesture, return "No gesture detected."
         3. Be robust to lighting and background clutter. Focus on the hands and body pose.
         `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: prompt }
-        ]
-      },
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION_BASE,
-        maxOutputTokens: isWordMode ? 15 : 60,
-        temperature: 0.2, // Lower temperature for more deterministic/stable classification
-        thinkingConfig: { thinkingBudget: 0 }, // Disable thinking for low latency and to support maxOutputTokens
-      }
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.2-11b-vision-preview',
+      messages: [
+        {
+          role: 'system',
+          content: SYSTEM_INSTRUCTION_BASE
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+          ] as any
+        }
+      ],
+      temperature: 0.2,
+      max_tokens: isWordMode ? 15 : 60,
     });
 
-    return response.text || "No gesture detected.";
+    return response.choices[0]?.message?.content || "No gesture detected.";
   } catch (error) {
     console.error("Gesture analysis failed:", error);
     throw error;
@@ -82,49 +88,49 @@ export const analyzeGesture = async (
  * Converts text or image text to ASL-friendly English (Gloss format estimation)
  */
 export const processTextForAvatar = async (
-  inputText: string, 
+  inputText: string,
   base64Image: string | null,
   mode: RecognitionMode,
   language: string = "Auto"
 ): Promise<{ original: string, gloss: string }> => {
   try {
-    let contents: any[] = [];
-    
-    if (base64Image) {
-      contents.push({ inlineData: { mimeType: 'image/jpeg', data: base64Image } });
-      contents.push({ text: `Extract text from this image. The expected language is "${language}" (or auto-detect if Auto). Translate it to English if needed, and then provide the ASL Gloss.` });
-    } else {
-      contents.push({ text: `Process this input text: "${inputText}". User specified language: "${language}".` });
-    }
+    let messages: any[] = [
+      { role: 'system', content: SYSTEM_INSTRUCTION_BASE }
+    ];
 
-    contents.push({ 
-      text: `
+    const taskDescription = `
       Task:
       1. Detect the source language of the input text (hint: user selected ${language}).
       2. Translate the input into natural, clear English.
       3. Convert that English into ASL Gloss keywords for an avatar.
-      
+
       Output JSON format: { "english": "Translated English Text", "gloss": "ASL GLOSS TEXT" }
-      ` 
+    `;
+
+    if (base64Image) {
+      messages.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: `Extract text from this image. The expected language is "${language}". ${taskDescription}` },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+        ]
+      });
+    } else {
+      messages.push({
+        role: 'user',
+        content: `Process this input text: "${inputText}". User specified language: "${language}". ${taskDescription}`
+      });
+    }
+
+    const response = await groq.chat.completions.create({
+      model: base64Image ? 'llama-3.2-11b-vision-preview' : 'llama3-8b-8192',
+      messages: messages,
+      response_format: { type: "json_object" }
     });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: contents },
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION_BASE,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            english: { type: Type.STRING },
-            gloss: { type: Type.STRING }
-          }
-        }
-      }
-    });
-
-    const result = JSON.parse(response.text || '{}');
+    const content = response.choices[0]?.message?.content;
+    const result = content ? JSON.parse(content) : {};
+    
     return {
       original: result.english || "Processing error",
       gloss: result.gloss || ""
@@ -145,39 +151,51 @@ export const processSpeech = async (
   language: string = "Auto"
 ): Promise<{ text: string, gloss: string }> => {
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: mimeType, data: audioBase64 } },
-          { 
-             text: `
-             Task:
-             1. Listen to the audio. The user specified language is "${language}" (if Auto, detect it).
-             2. Transcribe and translate the speech into clear English text.
-             3. Convert the English translation into ASL Gloss keywords.
-             
-             Output JSON format: { "transcription": "English Translation", "gloss": "ASL GLOSS" }
-             `
-          }
-        ]
-      },
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION_BASE,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            transcription: { type: Type.STRING },
-            gloss: { type: Type.STRING }
-          }
-        }
-      }
+    // 1. Convert Base64 to File for Whisper
+    const byteCharacters = atob(audioBase64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: mimeType });
+    const file = new File([blob], "audio.wav", { type: mimeType });
+
+    // 2. Transcribe using Groq Whisper
+    const transcription = await groq.audio.transcriptions.create({
+      file: file,
+      model: "whisper-large-v3-turbo",
+      language: language === 'Auto' ? undefined : undefined,
+      response_format: "json"
     });
 
-    const result = JSON.parse(response.text || '{}');
+    const transcribedText = transcription.text;
+
+    // 3. Convert to Gloss using Llama
+    const response = await groq.chat.completions.create({
+      model: 'llama3-8b-8192',
+      messages: [
+        { role: 'system', content: SYSTEM_INSTRUCTION_BASE },
+        { 
+          role: 'user', 
+          content: `
+            The user said: "${transcribedText}".
+            Task:
+            1. Translate to clear English if needed.
+            2. Convert to ASL Gloss.
+            
+            Output JSON format: { "transcription": "English Translation", "gloss": "ASL GLOSS" }
+          ` 
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const content = response.choices[0]?.message?.content;
+    const result = content ? JSON.parse(content) : {};
+
     return {
-      text: result.transcription || "Could not hear audio clearly.",
+      text: result.transcription || transcribedText,
       gloss: result.gloss || ""
     };
   } catch (error) {
