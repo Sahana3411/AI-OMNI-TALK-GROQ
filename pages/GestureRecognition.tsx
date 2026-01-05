@@ -1057,6 +1057,7 @@ export default function GestureRecognition({ onBack, onSuccess }: GestureRecogni
                 </button>
             </div>
           </div>
+        </div>
 
           {/* Settings Modal */}
           {showSettings && (
