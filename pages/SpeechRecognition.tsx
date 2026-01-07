@@ -35,12 +35,17 @@ const SpeechRecognition: React.FC<SpeechRecognitionProps> = ({ onBack, onSuccess
   const [gloss, setGloss] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState("Auto");
+  const [playTrigger, setPlayTrigger] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startRecording = async () => {
     try {
+      // Reset state to ensure Avatar triggers even if the same phrase is spoken
+      setGloss("");
+      setTranscript("");
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -71,6 +76,8 @@ const SpeechRecognition: React.FC<SpeechRecognitionProps> = ({ onBack, onSuccess
 
   const handleAudioProcessing = async (blob: Blob) => {
     setIsProcessing(true);
+    setGloss(""); // Reset gloss to ensure Avatar triggers on new result (crucial for file uploads)
+
     try {
       const reader = new FileReader();
       reader.readAsDataURL(blob);
@@ -79,8 +86,10 @@ const SpeechRecognition: React.FC<SpeechRecognitionProps> = ({ onBack, onSuccess
         const base64Audio = (reader.result as string).split(',')[1];
         // Ensure we send the correct MIME type to Gemini
         const result = await processSpeech(base64Audio, blob.type, selectedLanguage);
+        console.log("Speech Result:", result); // Debugging: Check console to see if gloss is present
         setTranscript(result.text);
         setGloss(result.gloss);
+        setPlayTrigger(prev => prev + 1);
         onSuccess();
       };
     } catch (error) {
@@ -178,7 +187,12 @@ const SpeechRecognition: React.FC<SpeechRecognitionProps> = ({ onBack, onSuccess
               aria-atomic="true"
             >
                 <h3 className="text-[10px] font-bold text-gray-400 uppercase mb-3 tracking-widest">Live Transcript</h3>
-                {transcript ? (
+                {isProcessing ? (
+                  <div className="flex flex-col items-center justify-center h-full min-h-[100px] space-y-3">
+                    <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+                    <p className="text-sm text-gray-500 font-medium animate-pulse">Processing speech...</p>
+                  </div>
+                ) : transcript ? (
                   <p className="text-xl md:text-2xl text-gray-800 dark:text-gray-200 font-medium leading-relaxed animate-fade-in">{transcript}</p>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-40 text-gray-300 dark:text-gray-700">
@@ -195,7 +209,7 @@ const SpeechRecognition: React.FC<SpeechRecognitionProps> = ({ onBack, onSuccess
              <div className="absolute inset-0 bg-gradient-to-b from-orange-50/30 to-amber-50/30 dark:from-gray-900 dark:to-black opacity-50 pointer-events-none"></div>
             
             <div className="flex-grow relative h-full w-full z-0">
-              <ThreeAvatar gloss={gloss} />
+              <ThreeAvatar gloss={gloss} triggerAnimation={playTrigger} />
             </div>
 
             {/* Result Overlay - Ultra Compact for Mobile */}

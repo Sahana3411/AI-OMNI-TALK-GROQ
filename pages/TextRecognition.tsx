@@ -102,7 +102,13 @@ const TextRecognition: React.FC<TextRecognitionProps> = ({ onBack, onSuccess }) 
 
              <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1" role="radiogroup" aria-label="Processing Mode">
                 <button 
-                  onClick={() => setMode(RecognitionMode.WORD)}
+                  onClick={() => {
+                    setMode(RecognitionMode.WORD);
+                    // Truncate to single word if switching to Word mode
+                    if (inputText.trim().includes(' ')) {
+                      setInputText(inputText.trim().split(/\s+/)[0]);
+                    }
+                  }}
                   role="radio"
                   aria-checked={mode === RecognitionMode.WORD}
                   className={`px-3 py-1 text-xs font-bold rounded-md transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 ${mode === RecognitionMode.WORD ? 'bg-white dark:bg-gray-700 text-emerald-600 dark:text-emerald-400 shadow-sm' : 'text-gray-400'}`}
@@ -165,7 +171,16 @@ const TextRecognition: React.FC<TextRecognitionProps> = ({ onBack, onSuccess }) 
               <textarea
                 id="text-input"
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (mode === RecognitionMode.WORD) {
+                    // Enforce single word: take first part if space is typed
+                    const clean = val.replace(/[\n\r]/g, '');
+                    setInputText(clean.split(' ')[0]);
+                  } else {
+                    setInputText(val);
+                  }
+                }}
                 placeholder={`Type here in ${selectedLanguage === 'Auto' ? 'any language' : selectedLanguage}...`}
                 className="w-full h-full bg-transparent border-none resize-none outline-none text-lg md:text-xl text-gray-800 dark:text-gray-100 placeholder-gray-400 font-medium focus:ring-0"
               />

@@ -22,7 +22,7 @@ Rules:
 - Gloss must be UPPERCASE.
 - Remove articles and "to be" verbs.
 - Return ONLY what is asked. No explanations.
-- Do NOT provide synonyms. Use the exact single Gloss word.
+- Do NOT provide synonyms. Use the exact Gloss word.
 `;
 
 /* ============================================================================
@@ -31,8 +31,13 @@ Rules:
 function safeParseJSON(content?: string): any {
   if (!content) return {};
   try {
-    const cleaned = content.replace(/```json|```/g, "").trim();
-    return JSON.parse(cleaned);
+    // Attempt to find JSON object within text (handles markdown code blocks and chatter)
+    const firstBrace = content.indexOf('{');
+    const lastBrace = content.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      return JSON.parse(content.substring(firstBrace, lastBrace + 1));
+    }
+    return JSON.parse(content);
   } catch (e) {
     console.error("JSON parse failed. Raw:", content);
     return {};
@@ -53,7 +58,7 @@ export const analyzeGesture = async (
 
     const prompt = isWordMode
       ? `
-Identify the hand sign.
+Identify the hand and body sign.
 Return ONLY one English word.
 If unclear, return "No gesture detected".
 `
@@ -101,6 +106,13 @@ export const processTextForAvatar = async (
   language: string = "Auto"
 ): Promise<{ original: string; gloss: string }> => {
   try {
+    if (!base64Image) {
+      return {
+        original: inputText || "",
+        gloss: (inputText || "").toUpperCase(),
+      };
+    }
+
     const isWordMode =
       mode === RecognitionMode.WORD || (mode as any) === "WORD";
 
@@ -110,6 +122,7 @@ Task:
 2. Translate the input to clear English ${isWordMode ? "(Single Word)" : "(Sentence)"}.
 3. Convert the English translation to ASL Gloss (UPPERCASE).
    - STRICT: Do not output synonyms. Input "Please" -> Gloss "PLEASE".
+   ${isWordMode ? "- STRICT: Output exactly one word for gloss." : ""}
 
 Output JSON Schema:
 {
@@ -219,7 +232,7 @@ export const processSpeech = async (
     // Whisper STT
     const transcription = await groq.audio.transcriptions.create({
       file,
-      model: "whisper-large-v3", // Use non-turbo for better accuracy
+      model: "whisper-large-v3-turbo", // Use non-turbo for better accuracy
       response_format: "json",
       language: isoLang, // Explicit language improves accuracy
       temperature: 0.0, // Deterministic output
@@ -228,33 +241,52 @@ export const processSpeech = async (
 
     const spokenText = transcription.text || "";
 
+    if (!spokenText.trim()) {
+      return { text: "", gloss: "" };
+    }
+
     // Convert to Gloss
+    const task = `
+Task:
+1. Translate the input audio to clear English (if not already).
+2. Convert the English translation to ASL Gloss (UPPERCASE).
+   - STRICT: Do not output synonyms. Input "Please" -> Gloss "PLEASE".
+
+Output JSON Schema:
+{
+  "transcription": "string",
+  "gloss": "string"
+}
+
+Ensure the keys are exactly "transcription" and "gloss".
+`;
+
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant", // ✅ ACTIVE MODEL
       messages: [
         { role: "system", content: SYSTEM_INSTRUCTION_BASE },
         {
           role: "user",
-          content: `
-Return JSON ONLY.
-Convert to English if needed.
-Convert to ASL Gloss.
-
-Format:
-{ "transcription": "TEXT", "gloss": "ASL GLOSS" }
-
-Input: "${spokenText}"
-`,
+          content: `Input: "${spokenText}". ${task}`,
         },
       ],
       response_format: { type: "json_object" },
     });
 
     const result = safeParseJSON(response.choices[0]?.message?.content);
+    
+    // Fallback: If gloss is missing, use the spoken text (Uppercased)
+    // This ensures the Avatar always triggers if speech was detected.
+    const finalText = result.transcription || spokenText;
+    let finalGloss = result.gloss;
+
+    if (!finalGloss && finalText) {
+      finalGloss = finalText.toUpperCase().replace(/[.,?]/g, "");
+    }
 
     return {
-      text: result.transcription || spokenText,
-      gloss: result.gloss || "",
+      text: finalText,
+      gloss: finalGloss || "",
     };
   } catch (err) {
     console.error("Speech failed:", err);
