@@ -45,3 +45,85 @@ The system converts gestures, text, and speech into meaningful outputs such as *
 3. Open the terminal (`Ctrl + ~`) and install dependencies:
    ```bash
    npm install
+   ```
+
+---
+
+### 🔐 Configuration
+
+1. Create a `.env` file in the **root directory**.
+
+2. Add your **Groq API Key**:
+
+   ```env
+   VITE_GROQ_API_KEY=your_actual_groq_api_key_here
+   ```
+
+   > Ensure you have a valid API key from **Groq Cloud**.
+
+3. Place your **rigged 3D avatar file** named:
+
+   ```
+   model.glb
+   ```
+
+   inside the:
+
+   ```
+   public/
+   ```
+
+   folder.
+
+---
+
+### ▶️ Running the Application
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+Open your browser and navigate to:
+
+```
+http://localhost:5173
+```
+
+(or the local URL shown in the terminal)
+
+---
+
+## 🌍 Deployment
+
+This project is deployed using **Vercel**.
+
+To create a production build:
+
+```bash
+npm run build
+```
+
+---
+
+## 📌 Important Notes
+
+* Do **not** commit the `.env` file.
+* Ensure the 3D avatar is properly **rigged for animation**.
+* Recommended browsers: **Chrome / Edge**.
+
+---
+
+## 🤝 Contribution
+
+Contributions and improvements are welcome.
+Feel free to fork the repository and submit a pull request.
+
+---
+
+## 📄 License
+
+This project is developed for **educational purpose**.
+
+---
